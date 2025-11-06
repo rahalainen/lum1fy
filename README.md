@@ -63,6 +63,7 @@ lum1fy --merge-audio .
 
 <details>
   <summary> ✧ v1.3.0 — Some refactoring, usability improvements ✧ </summary>
+  
   - Added `--no-color` option  
   - Added `-y/--yes` for non-interactive overwrite & Discord re-encode  
   - Verbose logging (-v/--verbose)  
@@ -72,6 +73,7 @@ lum1fy --merge-audio .
 
 <details>
   <summary> ✧ v1.2.0 — Added Discord auto-calc ✧ </summary>
+  
   - Added Discord-specific bitrate mode  
   - Added output directory option (-d)  
   - Improved trimming handling
@@ -80,6 +82,7 @@ lum1fy --merge-audio .
   
 <details>
   <summary> ✧ v1.1.0 — First improvements ✧ </summary>
+  
   - Added bitrate (VBR) mode 
   - Added progress bars
   - Support for audio track merging
@@ -87,5 +90,6 @@ lum1fy --merge-audio .
 
 <details>
   <summary> ✧ v1.0.0 — Initial script ✧ </summary>
+  
   - Basic AV1 conversion, trimming, and CRF mode
 </details>
