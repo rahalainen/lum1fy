@@ -11,41 +11,48 @@ lum1fy [options] <file|directory>
 ```
 ---
 
-## Quality options (mutually exclusive)
+## Quality modes (mutually exclusive)
 
 Choose one of these modes: (default: `-q`)
-  
-| Mode | Option | Description |
+
+| Option | Default | Description |
 |------|--------|-------------|
-| Constant Quality | `-q, --quality <crf>` | CRF value (1-63, lower = higher quality) (default: 30) |
-| Average Bitrate | `-b, --bitrate <bitrate>` | Target video bitrate (e.g., 2000k) (mutually exclusive with `-q` and `--discord`) |
-| Discord Auto-Calc | `--discord <mode>` | Automatically calculates bitrate for Discord limits; <a href=#modes-for-discord-auto-calc>see table below</a> |
+| `-q, --quality <crf>` | 30 | **Constant Quality mode** - CRF value (1-63, lower = higher quality) |
+| `-b, --bitrate <bitrate>` | - | **Average Bitrate mode** - Target video bitrate (e.g., 2000k) |
+| `--discord <mode>` | - | **Discord Auto-Calc** mode - Optimizes for Discord limits; <a href=#modes-for-discord-auto-calc>see table below</a> |
 
 ### Modes for Discord Auto-Calc
 | Mode | Output size target | Description |
 |------|--------------------|-------------|
-| `free` | 10 MB | Free Discord account & no server boosts |
-| `basic` | 50 MB | Discord Nitro Basic & Level 2 Server Boost perk |
+| `free` | 10 MB | Free Discord account and no server boosts |
+| `basic` | 50 MB | Discord Nitro Basic or Level 2 Server Boost perk |
 | `serverboost` | 100 MB | Level 3 Server Boost perk |
-| `nitro` | 500 MB | Discord Nitro (full) |
+| `nitro` | 500 MB | Discord Nitro |
 
 ---
 
 ## Options
 
 - All of these go to `[options]`
-  
-| Option | Description |
-|--------|-------------|
-| `-s, --speed <preset>` | SVT-AV1 speed preset (0-13, lower = slower but better quality) (default: 4) |
-| `--start <secs>` | Trim start (seconds or hh:mm:ss), optional |
-| `--end <secs>` | Trim end (seconds or hh:mm:ss), optional |
-| `--merge-audio` | Mix multiple audio tracks into a single audio track |
-| `--no-color` | Disable color output (NO_COLOR=1 also works) |
-| `-y, --yes` | Force overwrite existing files & force re-encode in `--discord` mode (non-interactive) |
-| `-v, --verbose` | Enable verbose logging (print info-level events) |
-| `-d, --dir` | Write outputs to `av1-output/<name>.mp4` instead of `<name>-av1.mp4` |
-| `-h, --help` | Show this help message |
+
+### Video options
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-s, --speed <preset>` | 4 | SVT-AV1 speed preset (0-13, lower = slower but better quality) |
+| `--start <secs>` | 0 | Trim start (seconds or hh:mm:ss) |
+| `--end <secs>` | \<input len\> | Trim end (seconds or hh:mm:ss) |
+| `--merge-audio` | - | Mix multiple audio tracks into a single audio track |
+
+### General options
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--no-color` | - | Disable color output (NO_COLOR=1 also works) |
+| `-d, --dir` | - | Write outputs to `av1-output/<name>.mp4` instead of `<name>-av1.mp4` |
+| `-y, --yes` | - | Force overwrite existing files & force re-encode in `--discord` mode (non-interactive) |
+| `-n, --no` | - | Force skip existing files & in `--discord` mode if source file is smaller than the limit (non-interactive) |
+| `-r, --recursive` | - | Get videos recursively from given directories |
+| `-v, --verbose` | - | Enable verbose logging (print info-level events) |
+| `-h, --help` | - | Show this help message |
 
 ---
 
@@ -60,6 +67,15 @@ lum1fy --merge-audio .
 ---
 
 ## Changelog
+
+<details>
+  <summary> ✧ v1.4.0 — Improved stats printing, added force-skip mode ✧ </summary>
+  
+  - Added `-n/--no` option for non-interactive skip (skip version of `-y`)
+  - Improved stats printing
+  - Changed Discord bitrate limit from 16 → 12 mbps
+  - Misc bug fixes and README improvements
+</details>
 
 <details>
   <summary> ✧ v1.3.0 — Some refactoring, usability improvements ✧ </summary>
