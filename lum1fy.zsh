@@ -19,6 +19,7 @@
 #   --no-color               disable color output (NO_COLOR=1 also works)
 #   -y, --yes                force overwrite existing files & force re-encode in --discord mode (non-interactive)
 #   -v, --verbose            enable verbose logging (print info-level events)
+#   -r, --recursive          get videos recursively from given directories (default: false)
 #   -d, --dir                write outputs to 'av1-output/<name>.mp4' instead of '<name>-av1.mp4'
 #   -h, --help               show this help message
 #
@@ -32,19 +33,31 @@
 ## --- user defaults (configurable) --- ##
 DEFAULT_SPEED=4
 DEFAULT_CRF=30
-MAX_BITRATE_KBPS="16000"      # cap for calculated discord bitrate
-MARGIN_KBPS="500"             # extra margin for discord bitrate (audio + overhead)
+MAX_bitrate_KBPS="16000"      # cap for calculated discord bitrate
+MARGIN_KBPS="200"             # extra margin for discord bitrate (audio + overhead)
 OUTPUT_DIR_NAME="av1-output"  # name for the output directory (still stored relative to input files!)
 
 
 ## --- runtime globals (do not touch) --- ##
-TOTAL_TIME=0
-TOTAL_IN_SIZE=0
-TOTAL_OUT_SIZE=0
-PROCESSED_COUNT=0
-SCRIPT_PATH="${(%):-%x}"
-SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-SCRIPT_NAME="$(basename "$SCRIPT_PATH")"
+total_time=0
+total_in_size=0
+total_out_size=0
+processed_count=0
+script_path="${(%):-%x}"
+script_dir="$(dirname "$script_path")"
+script_name="$(basename "$script_path")"
+discord_mode=""
+bitrate_mode=false
+bitrate=""
+start_s=0
+end_s=0
+merge_audio=false
+force_overwrite=false
+verbose=false
+output_dir_mode=false
+recursive=false
+input_files=()
+exclusive_count=0
 
 
 ## --- set colors --- ##
@@ -88,7 +101,7 @@ show_help() {
       if (line ~ /^~ /) line = info_color line reset  # color headers
       print line
     }
-  ' "$SCRIPT_PATH"
+  ' "$script_path"
 }
 
 success() {
@@ -102,7 +115,7 @@ success() {
 }
 
 info() {
-  if ! $VERBOSE; then return; fi
+  if ! $verbose; then return; fi
   local emojis=("ᓚᘏᗢ" "/ᐠ-˕-マ" "/ᐠ. .ᐟ\Ⳋ")
   local emoji="${emojis[RANDOM % ${#emojis[@]} + 1]}"
   if [[ "$USE_COLOR" != false ]]; then
@@ -204,9 +217,9 @@ calculate_discord_bitrate() {
   # calculate bitrate
   local bitrate_kbps=$(( target_kbits / clip_len - MARGIN_KBPS ))
 
-  # cap by MAX_BITRATE_KBPS if provided
-  if (( MAX_BITRATE_KBPS > 0 && bitrate_kbps > MAX_BITRATE_KBPS )); then
-    bitrate_kbps=$MAX_BITRATE_KBPS
+  # cap by MAX_bitrate_KBPS if provided
+  if (( MAX_bitrate_KBPS > 0 && bitrate_kbps > MAX_bitrate_KBPS )); then
+    bitrate_kbps=$MAX_bitrate_KBPS
   fi
 
   echo "$bitrate_kbps"
@@ -242,7 +255,7 @@ build_ffmpeg_args() {
   local args=()
 
   # set loglevel
-  if ! $VERBOSE; then
+  if ! $verbose; then
     args+=(-hide_banner -loglevel error)
   fi
 
@@ -266,16 +279,16 @@ build_ffmpeg_args() {
   [[ -z "$SPEED" ]] && SPEED=$DEFAULT_SPEED
   [[ -z "$CRF" ]] && CRF=$DEFAULT_CRF
 
-  if $BITRATE_MODE; then
+  if $bitrate_mode; then
     # explicit bitrate mode or discord calculated
-    args+=(-c:v libsvtav1 -svtav1-params "no-progress=1:rc=1:tbr=${BITRATE}:preset=${SPEED}")
+    args+=(-c:v libsvtav1 -svtav1-params "no-progress=1:rc=1:tbr=${bitrate}:preset=${SPEED}")
   else
     # CRF mode
     args+=(-c:v libsvtav1 -svtav1-params "no-progress=1:rc=0:crf=${CRF}:preset=${SPEED}")
   fi
 
   # audio args
-  args+=($(build_audio_args "$infile" $MERGE_AUDIO))
+  args+=($(build_audio_args "$infile" $merge_audio))
 
   # output file
   args+=("$outfile")
@@ -322,7 +335,7 @@ process_file() {
   local dir=${infile:h}
   local outfile
 
-  if $OUTPUT_DIR_MODE; then
+  if $output_dir_mode; then
     mkdir -p $OUTPUT_DIR_NAME
     outfile="${dir}/$OUTPUT_DIR_NAME/${base}.mp4"
   else
@@ -335,8 +348,8 @@ process_file() {
   local in_size=$(stat -c%s "$infile" 2>/dev/null || stat -f%z "$infile")
 
   # get start time and end time
-  local start_s=$START_S
-  local end_s=$END_S
+  local start_s=$start_s
+  local end_s=$end_s
   (( $end_s <= 0 )) && end_s=$(get_duration "$infile")
 
   # compute clip length (seconds)
@@ -347,36 +360,36 @@ process_file() {
   fi
 
   # handle --discord auto bitrate: compute per-file (uses trimmed length)
-  if [[ -n "$DISCORD_MODE" ]]; then
+  if [[ -n "$discord_mode" ]]; then
     # get filesize limit
     local limit_mb
-    case "$DISCORD_MODE" in
+    case "$discord_mode" in
       free)  limit_mb=10 ;;
       basic) limit_mb=50 ;;
       serverboost) limit_mb=100 ;;
       nitro) limit_mb=500 ;;
       *)
-        error "Unknown discord mode '$DISCORD_MODE'!"
+        error "Unknown discord mode '$discord_mode'!"
         return 1
         ;;
     esac
 
     # pass start/end seconds into calculator
-    BITRATE=$(calculate_discord_bitrate "$limit_mb" "$clip_len") || { error "Discord bitrate calc failed!"; return 1; }
-    BITRATE_MODE=true
-    if (( in_size < BITRATE * clip_len / 8 * 1000 )); then
+    bitrate=$(calculate_discord_bitrate "$limit_mb" "$clip_len") || { error "Discord bitrate calc failed!"; return 1; }
+    bitrate_mode=true
+    if (( in_size < bitrate * clip_len / 8 * 1000 )); then
       printf "Source file is only %.1f MB! Continuing with '--discord %s' would re-encode to ~%.1f MB. Continue anyway? [y/N] " \
         "$(awk "BEGIN{printf \"%.1f\", $in_size/1000000}")" \
-        "$DISCORD_MODE" \
+        "$discord_mode" \
         "$limit_mb"
       read -r answer
       [[ $answer != [Yy]* ]] && { warning "Skipping '${RESET}$infile${WARNING} (canceled)..."; return 2 }
     fi
-    info "Discord mode '$DISCORD_MODE' selected: bitrate will be ${BITRATE} kbps!"
+    info "Discord mode '$discord_mode' selected: bitrate will be ${bitrate} kbps!"
   fi
 
   # check if file exists (better error handling than native ffmpeg)
-  if [[ -f "$outfile" ]] && ! $FORCE_OVERWRITE; then
+  if [[ -f "$outfile" ]] && ! $force_overwrite; then
     echo -n "File '$outfile' already exists. Overwrite? [y/N] "
     read -r ans
     if [[ $ans != [Yy]* ]]; then
@@ -407,10 +420,10 @@ process_file() {
 
   success "Done:${RESET} $outfile  ${SUCCESS}(took ${RESET}$took${SUCCESS}, shrunk by ${RESET}$shrink%${SUCCESS})"
 
-  TOTAL_TIME=$(( TOTAL_TIME + elapsed ))
-  TOTAL_IN_SIZE=$(( TOTAL_IN_SIZE + in_size ))
-  TOTAL_OUT_SIZE=$(( TOTAL_OUT_SIZE + out_size ))
-  PROCESSED_COUNT=$(( PROCESSED_COUNT + 1 ))
+  total_time=$(( total_time + elapsed ))
+  total_in_size=$(( total_in_size + in_size ))
+  total_out_size=$(( total_out_size + out_size ))
+  processed_count=$(( processed_count + 1 ))
 }
 
 
@@ -425,18 +438,6 @@ done
 
 
 ## --- parse args (long + short) --- ##
-DISCORD_MODE=""
-BITRATE_MODE=false
-BITRATE=""
-START_S=0
-END_S=0
-MERGE_AUDIO=false
-FORCE_OVERWRITE=false
-VERBOSE=false
-OUTPUT_DIR_MODE=false
-INPUT=""
-exclusive_count=0
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -s|--speed)
@@ -459,43 +460,45 @@ while [[ $# -gt 0 ]]; do
         error "$1 requires a bitrate value (e.g. 2000k)!"
         exit 1
       fi
-      ((exclusive_count++)); BITRATE_MODE=true; BITRATE="$2"; shift 2
+      ((exclusive_count++)); bitrate_mode=true; bitrate="$2"; shift 2
       ;;
     --discord)
       if [[ -z "$2" ]]; then
         error "$1 requires a mode: 'free', 'basic', 'serverboost', or 'nitro'"
         exit 1
       fi
-      ((exclusive_count++)); DISCORD_MODE="$2"; shift 2
+      ((exclusive_count++)); discord_mode="$2"; shift 2
       ;;
     --start)
       if ! is_number_in_range "$2" 0 ""; then
         error "$1 requires a start time (seconds)"
         exit 1
       fi
-      START_S=$(parse_time_to_seconds "$2"); shift 2
+      start_s=$(parse_time_to_seconds "$2"); shift 2
       ;;
     --end)
       if ! is_number_in_range "$2" 0 ""; then
         error "$1 requires an end time (seconds)"
         exit 1
       fi
-      END_S=$(parse_time_to_seconds "$2"); shift 2
+      end_s=$(parse_time_to_seconds "$2"); shift 2
       ;;
-    --merge-audio) MERGE_AUDIO=true; shift ;;
+    --merge-audio) merge_audio=true; shift ;;
     --no-color) shift ;;
-    -y|--yes) FORCE_OVERWRITE=true; shift;;
-    -v|--verbose) VERBOSE=true; shift;;
-    -d|--dir) OUTPUT_DIR_MODE=true; shift ;;
+    -y|--yes) force_overwrite=true; shift;;
+    -v|--verbose) verbose=true; shift;;
+    -d|--dir) output_dir_mode=true; shift ;;
+    -r|--recursive) recursive=true; shift ;;
     -h|--help) show_help; exit 0 ;;
     --) shift; break ;;
     -*) error "Unknown option: '$1'"; show_help; exit 1 ;;
-    *) INPUT="$1"; shift ;;
+    *) input_files+=("$1"); shift ;;
   esac
 done
 
-if [[ -z "$INPUT" ]]; then
-  error "No input given! Use -h for help."
+# sanity check
+if (( ${#input_files[@]} == 0 )); then
+  error "No input files or directories provided!"
   exit 1
 fi
 
@@ -507,40 +510,61 @@ fi
 
 
 ## --- main logic --- ##
-if [ -d "$INPUT" ]; then
-  files=("$INPUT"/*.{mp4,mkv,mov,webm}(.N))   # glob for common containers, nullglob-safe
-  files=(${files:#*$'-av1.mp4'})              # remove any ending with -av1.mp4
-  total=${#files[@]}
-  if (( total == 0 )); then
-    error "No supported files found in '$INPUT'!"
-    exit 1
+files=()
+
+# collect files
+for inpath in "${input_files[@]}"; do
+  if [ -d "$inpath" ]; then
+    if [ "$recursive" = true ]; then
+      # recursively find matching files
+      while IFS= read -r -d '' f; do
+        files+=("$f")
+      done < <(find "$inpath" -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.mov' -o -iname '*.webm' \) -print0)
+    else
+      # non-recursive glob (nullglob-safe)
+      dirfiles=("$inpath"/*.{mp4,mkv,mov,webm}(.N))
+      files+=("${dirfiles[@]}")
+    fi
+  elif [ -f "$inpath" ]; then
+    files+=("$inpath")
+  else
+    warn "Skipping invalid input: $inpath"
   fi
-  count=0
-  for f in $files; do
-    ((count++))
-    process_file "$f" "$count" "$total"
-  done
-elif [ -f "$INPUT" ]; then
-  count=1
-  total=1
-  process_file "$INPUT" "$count" "$total"
-else
-  error "'$INPUT' is not a valid file or directory!"
+done
+
+# filter out any that end with -av1.mp4
+filtered=()
+for f in "${files[@]}"; do
+  [[ "$f" == *-av1.mp4 ]] && continue
+  filtered+=("$f")
+done
+files=("${filtered[@]}")
+
+total=${#files[@]}
+if (( total == 0 )); then
+  error "No supported files found!"
   exit 1
 fi
 
+# process everything
+count=0
+for f in "${files[@]}"; do
+  ((count++))
+  process_file "$f" "$count" "$total"
+done
+
 # --- summary ---
-if (( PROCESSED_COUNT > 0 )); then
+if (( processed_count > 0 )); then
   total_shrink=0
-  if (( TOTAL_IN_SIZE > 0 )); then
-    total_shrink=$(( 100 - (TOTAL_OUT_SIZE * 100 / TOTAL_IN_SIZE) ))
+  if (( total_in_size > 0 )); then
+    total_shrink=$(( 100 - (total_out_size * 100 / total_in_size) ))
     (( total_shrink < 0 )) && total_shrink=0
   fi
-  total_time_str=$(format_duration "$TOTAL_TIME")
+  total_time_str=$(format_duration "$total_time")
   avg_shrink=0
-  if (( PROCESSED_COUNT > 0 )); then avg_shrink=$(( total_shrink / PROCESSED_COUNT )); fi
+  if (( processed_count > 0 )); then avg_shrink=$(( total_shrink / processed_count )); fi
 
-  echo "${INFO}✧ ${BOLD}All done in ${RESET}${total_time_str}${INFO}${BOLD}! ${RESET}${PROCESSED_COUNT} ${INFO}${BOLD}file(s) processed ${RESET}${INFO}✧${RESET}"
+  echo "${INFO}✧ ${BOLD}All done in ${RESET}${total_time_str}${INFO}${BOLD}! ${RESET}${processed_count} ${INFO}${BOLD}file(s) processed ${RESET}${INFO}✧${RESET}"
   echo "${OTHER}   Total shrinkage:${RESET} ${total_shrink}%"
   echo "${OTHER}   Avg shrink per file:${RESET} ${avg_shrink}%"
   echo ""
