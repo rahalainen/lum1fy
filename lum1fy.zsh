@@ -9,7 +9,7 @@
 # ~ Quality modes (mutually exclusive) ~
 #   -q, --quality <crf>      CRF value (1..63, lower = higher quality) (default: $DEFAULT_CRF)
 #   -b, --bitrate <bitrate>  target video bitrate (eg "2000k") (mutually exclusive with -q and --discord)
-#   --discord <mode>         auto-calc bitrate for discord limits (inconsistent with high --speed values): free | basic | serverboost | nitro
+#   --discord <mode>         auto-calc bitrate for discord limits: free | basic | serverboost | nitro
 #
 # ~ Video options ~
 #   -s, --speed <preset>     svt-av1 speed preset (0..13, lower = slower but better quality) (default: $DEFAULT_SPEED)
@@ -36,7 +36,7 @@
 ## --- user defaults (configurable) --- ##
 DEFAULT_SPEED=4
 DEFAULT_CRF=30
-MAX_bitrate_KBPS="16000"      # cap for calculated discord bitrate
+MAX_bitrate_KBPS="12000"      # cap for calculated discord bitrate
 MARGIN_KBPS="500"             # extra margin for discord bitrate (audio + overhead)
 OUTPUT_DIR_NAME="av1-output"  # name for the output directory (still stored relative to input files!)
 
