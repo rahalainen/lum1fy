@@ -1,40 +1,43 @@
 #!/usr/bin/env zsh
-# ✧ lum1fy v1.3.0 ✧
+# ✧ lum1fy v1.4.0 ✧
 # converts videos to AV1 (SVT-AV1) with progress bars, trimming, bitrate/CRF modes,
 # Discord upload sizing, and optional audio merging
 #
 # ~ Usage ~
 #   lum1fy [options] <file|directory>
 #
-# ~ Quality options (mutually exclusive) ~
-#   -q, --quality <crf>      CRF value (1..63, lower = higher quality) (default: $CRF)
+# ~ Quality modes (mutually exclusive) ~
+#   -q, --quality <crf>      CRF value (1..63, lower = higher quality) (default: $DEFAULT_CRF)
 #   -b, --bitrate <bitrate>  target video bitrate (eg "2000k") (mutually exclusive with -q and --discord)
-#   --discord <mode>         auto-calc bitrate for discord limits: free | basic | serverboost | nitro
+#   --discord <mode>         auto-calc bitrate for discord limits (inconsistent with high --speed values): free | basic | serverboost | nitro
 #
-# ~ Options ~
-#   -s, --speed <preset>     svt-av1 speed preset (0..13, lower = slower but better quality) (default: $SPEED)
+# ~ Video options ~
+#   -s, --speed <preset>     svt-av1 speed preset (0..13, lower = slower but better quality) (default: $DEFAULT_SPEED)
 #   --start <secs>           trim start (seconds or hh:mm:ss), optional
 #   --end <secs>             trim end (seconds or hh:mm:ss), optional
 #   --merge-audio            mix multiple audio tracks to a single audio track
+#
+# ~ General options ~
 #   --no-color               disable color output (NO_COLOR=1 also works)
-#   -y, --yes                force overwrite existing files & force re-encode in --discord mode (non-interactive)
-#   -v, --verbose            enable verbose logging (print info-level events)
-#   -r, --recursive          get videos recursively from given directories (default: false)
 #   -d, --dir                write outputs to 'av1-output/<name>.mp4' instead of '<name>-av1.mp4'
+#   -y, --yes                force overwrite existing files & force re-encode in --discord mode (non-interactive)
+#   -n, --no                 force skip existing files & in --discord mode if source file is smaller than the limit (non-interactive)
+#   -r, --recursive          get videos recursively from given directories (default: false)
+#   -v, --verbose            enable verbose logging (print info-level events)
 #   -h, --help               show this help message
 #
 # ~ Examples ~
 #   lum1fy -q 24 hq_video.mp4
 #   lum1fy --bitrate 2000k -s 2 clip.mp4
 #   lum1fy --discord basic --start 10 --end 40 --merge-audio ~/Videos/cool-clip.mp4
-#   lum1fy --merge-audio .
+#   lum1fy --merge-audio -n .
 
 
 ## --- user defaults (configurable) --- ##
 DEFAULT_SPEED=4
 DEFAULT_CRF=30
 MAX_bitrate_KBPS="16000"      # cap for calculated discord bitrate
-MARGIN_KBPS="200"             # extra margin for discord bitrate (audio + overhead)
+MARGIN_KBPS="500"             # extra margin for discord bitrate (audio + overhead)
 OUTPUT_DIR_NAME="av1-output"  # name for the output directory (still stored relative to input files!)
 
 
@@ -53,11 +56,13 @@ start_s=0
 end_s=0
 merge_audio=false
 force_overwrite=false
+force_skip=false
 verbose=false
 output_dir_mode=false
 recursive=false
 input_files=()
-exclusive_count=0
+quality_exclusive_count=0
+yes_no_exclusive_count=0
 
 
 ## --- set colors --- ##
@@ -68,15 +73,15 @@ done
 [[ -n "$NO_COLOR" ]] && USE_COLOR=false
 
 if $USE_COLOR && [[ -t 1 ]]; then
-  CYAN="\033[36m"
   GREEN="\033[32m"
   YELLOW="\033[33m"
   MAGENTA="\033[35m"
+  CYAN="\033[36m"
   RED="\033[31m"
   BOLD="\033[1m"
   RESET="\033[0m"
 else
-  CYAN=""; GREEN=""; YELLOW=""; MAGENTA=""; RED=""; BOLD=""; RESET=""
+  GREEN=""; YELLOW=""; MAGENTA=""; CYAN=""; RED=""; BOLD=""; RESET=""
 fi
 
 # set default colors for each log level
@@ -89,15 +94,15 @@ OTHER=$MAGENTA
 
 ## --- print helpers --- ##
 show_help() {
-  awk -v info_color="$INFO" -v reset="$RESET" -v crf="$CRF" -v speed="$SPEED" '
+  awk -v info_color="$INFO" -v reset="$RESET" -v crf="$DEFAULT_CRF" -v speed="$DEFAULT_SPEED" '
     BEGIN { printing=0 }
     /^# ~/{ printing=1 }                              # start printing at first "# ~" line
     printing {
       if ($0 !~ /^#/) exit                            # stop at first non-comment line
       line = $0
       sub(/^# ?/, "", line)                           # remove leading "# " or "#"
-      gsub(/\$CRF/, crf, line)                        # replace $CRF
-      gsub(/\$SPEED/, speed, line)                    # replace $SPEED
+      gsub(/\$DEFAULT_CRF/, crf, line)                # replace $DEFAULT_CRF
+      gsub(/\$DEFAULT_SPEED/, speed, line)            # replace $DEFAULT_SPEED
       if (line ~ /^~ /) line = info_color line reset  # color headers
       print line
     }
@@ -311,17 +316,24 @@ encode_with_progress() {
 
   # run ffmpeg and pipe progress
   export SVT_LOG=1  # sets SVT log level to [error]
-  ffmpeg "${ffmpeg_args[@]}" | awk -v dur="$clip_len" '
-    BEGIN { bar_len = 30 }
+  ffmpeg "${ffmpeg_args[@]}" | awk -v dur="$clip_len" -v c1=$RED -v c2=$YELLOW -v c3=$GREEN -v RESET=$RESET '
+    BEGIN { bar_len = 32 }
     /^out_time_ms=/ {
       gsub(/out_time_ms=/, "")
       prog = $1 / (dur * 1000000)
       if (prog > 1) prog = 1
       filled = int(prog * bar_len)
+
+      # choose color
+      if (prog <= 0.33) color=c1
+      else if (prog <= 0.66) color=c2
+      else color=c3
+
+      # print colored bar
       printf "\r["
-      for (i=0; i<filled; i++) printf "■"
+      for (i=0; i<filled; i++) printf "%s■%s", color, RESET
       for (i=filled; i<bar_len; i++) printf " "
-      printf "] %3d%%", prog*100
+      printf "] %3d%%", int(prog*100)
       fflush()
     }
     END { print "" }
@@ -348,8 +360,6 @@ process_file() {
   local in_size=$(stat -c%s "$infile" 2>/dev/null || stat -f%z "$infile")
 
   # get start time and end time
-  local start_s=$start_s
-  local end_s=$end_s
   (( $end_s <= 0 )) && end_s=$(get_duration "$infile")
 
   # compute clip length (seconds)
@@ -377,7 +387,12 @@ process_file() {
     # pass start/end seconds into calculator
     bitrate=$(calculate_discord_bitrate "$limit_mb" "$clip_len") || { error "Discord bitrate calc failed!"; return 1; }
     bitrate_mode=true
-    if (( in_size < bitrate * clip_len / 8 * 1000 )); then
+    if (( in_size < bitrate * clip_len / 8 * 1000 )) && ! $force_overwrite; then
+      if $force_skip; then
+        warning "Skipping '${RESET}$infile${WARNING}' (output exists)..."
+        return 2
+      fi
+
       printf "Source file is only %.1f MB! Continuing with '--discord %s' would re-encode to ~%.1f MB. Continue anyway? [y/N] " \
         "$(awk "BEGIN{printf \"%.1f\", $in_size/1000000}")" \
         "$discord_mode" \
@@ -390,6 +405,12 @@ process_file() {
 
   # check if file exists (better error handling than native ffmpeg)
   if [[ -f "$outfile" ]] && ! $force_overwrite; then
+    if $force_skip; then
+      warning "Skipping '${RESET}$infile${WARNING}' (output exists)..."
+      return 2
+    fi
+
+    # interactive
     echo -n "File '$outfile' already exists. Overwrite? [y/N] "
     read -r ans
     if [[ $ans != [Yy]* ]]; then
@@ -408,17 +429,29 @@ process_file() {
 
   local end=$(date +%s)
   local elapsed=$(( end - start ))
+  local took=$(format_duration "$elapsed")
+
   local out_size=$(stat -c%s "$outfile" 2>/dev/null || stat -f%z "$outfile")
-  local shrink=0
+  local out_size_mb=$(awk "BEGIN {printf \"%.1f\", $out_size / 1000000}")
+
+  local diff=$(( out_size - in_size ))
+  local diff_mb=$(awk "BEGIN {printf \"%.1f\", $diff / 1000000}")
+
+  local percentage=0
   if (( in_size > 0 )); then
-    shrink=$(( 100 - (out_size * 100 / in_size) ))
-    (( shrink < 0 )) && shrink=0
+    percentage=$(awk "BEGIN {printf \"%.1f\", ($out_size / $in_size) * 100}")
   fi
 
-  local took
-  took=$(format_duration "$elapsed")
+  local msg
+  if (( diff < 0 )); then
+    msg="${SUCCESS}shrunk by ${RESET}${diff_mb#-} MB ${SUCCESS}/${RESET} ${percentage}%"
+  elif (( diff > 0 )); then
+    msg="${WARN}grew by ${RESET}${diff_mb} MB ${WARN}/${RESET} ${percentage}%"
+  else
+    msg="${INFO}same size as input!"
+  fi
 
-  success "Done:${RESET} $outfile  ${SUCCESS}(took ${RESET}$took${SUCCESS}, shrunk by ${RESET}$shrink%${SUCCESS})"
+  success "Done:${RESET} $outfile  ${SUCCESS}(took ${RESET}$took${SUCCESS}, output size ${RESET}${out_size_mb} MB${SUCCESS}, $msg ${SUCCESS}of original)"
 
   total_time=$(( total_time + elapsed ))
   total_in_size=$(( total_in_size + in_size ))
@@ -453,21 +486,21 @@ while [[ $# -gt 0 ]]; do
         error "$1 requires a CRF value (1..63)!"
         exit 1
       fi
-      ((exclusive_count++)); CRF="$2"; shift 2
+      ((quality_exclusive_count++)); CRF="$2"; shift 2
       ;;
     -b|--bitrate)
       if [[ -z "$2" || ! "$2" =~ ^[0-9]+([bkm])?$ ]]; then
         error "$1 requires a bitrate value (e.g. 2000k)!"
         exit 1
       fi
-      ((exclusive_count++)); bitrate_mode=true; bitrate="$2"; shift 2
+      ((quality_exclusive_count++)); bitrate_mode=true; bitrate="$2"; shift 2
       ;;
     --discord)
       if [[ -z "$2" ]]; then
         error "$1 requires a mode: 'free', 'basic', 'serverboost', or 'nitro'"
         exit 1
       fi
-      ((exclusive_count++)); discord_mode="$2"; shift 2
+      ((quality_exclusive_count++)); discord_mode="$2"; shift 2
       ;;
     --start)
       if ! is_number_in_range "$2" 0 ""; then
@@ -485,10 +518,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --merge-audio) merge_audio=true; shift ;;
     --no-color) shift ;;
-    -y|--yes) force_overwrite=true; shift;;
-    -v|--verbose) verbose=true; shift;;
     -d|--dir) output_dir_mode=true; shift ;;
+    -y|--yes) ((yes_no_exclusive_count++)); force_overwrite=true; shift ;;
+    -n|--no) ((yes_no_exclusive_count++)); force_skip=true; shift ;;
     -r|--recursive) recursive=true; shift ;;
+    -v|--verbose) verbose=true; shift ;;
     -h|--help) show_help; exit 0 ;;
     --) shift; break ;;
     -*) error "Unknown option: '$1'"; show_help; exit 1 ;;
@@ -502,9 +536,12 @@ if (( ${#input_files[@]} == 0 )); then
   exit 1
 fi
 
-# mutual exclusivity check
-if (( exclusive_count > 1 )); then
+# mutual exclusivity checks
+if (( quality_exclusive_count > 1 )); then
   error "Whoa there! --quality, --bitrate, and --discord are mutually exclusive - pick just one!"
+  exit 1
+elif (( yes_no_exclusive_count > 1 )); then
+  error "Whoa there! --yes and --no are mutually exclusive - pick just one!"
   exit 1
 fi
 
@@ -555,18 +592,30 @@ done
 
 # --- summary ---
 if (( processed_count > 0 )); then
-  total_shrink=0
-  if (( total_in_size > 0 )); then
-    total_shrink=$(( 100 - (total_out_size * 100 / total_in_size) ))
-    (( total_shrink < 0 )) && total_shrink=0
-  fi
   total_time_str=$(format_duration "$total_time")
-  avg_shrink=0
-  if (( processed_count > 0 )); then avg_shrink=$(( total_shrink / processed_count )); fi
+  total_in_size_mb=$(awk "BEGIN {printf \"%.1f\", $total_in_size / 1000000}")
+  total_out_size_mb=$(awk "BEGIN {printf \"%.1f\", $total_out_size / 1000000}")
+  total_diff=$(( total_out_size - total_in_size ))
+  total_diff_mb=$(awk "BEGIN {printf \"%.1f\", $total_diff / 1000000}")
+  total_percentage=0
+  if (( total_in_size > 0 )); then
+    total_percentage=$(awk "BEGIN {printf \"%.1f\", ($total_out_size / $total_in_size) * 100}")
+  fi
 
+  msg=""
+  if (( total_diff < 0 )); then
+    msg="Shrunk by ${RESET}${total_diff_mb#-} MB ${OTHER}/${RESET} ${total_percentage}% of original"
+  elif (( total_diff > 0 )); then
+    msg="Grew by ${RESET}${total_diff_mb} MB ${OTHER}/${RESET} ${total_percentage}% of original"
+  else
+    msg="Same size as input!"
+  fi
+
+  echo ""
   echo "${INFO}✧ ${BOLD}All done in ${RESET}${total_time_str}${INFO}${BOLD}! ${RESET}${processed_count} ${INFO}${BOLD}file(s) processed ${RESET}${INFO}✧${RESET}"
-  echo "${OTHER}   Total shrinkage:${RESET} ${total_shrink}%"
-  echo "${OTHER}   Avg shrink per file:${RESET} ${avg_shrink}%"
+  echo "${OTHER}   Total input size:${RESET} ${total_in_size_mb} MB"
+  echo "${OTHER}   Total output size:${RESET} ${total_out_size_mb} MB"
+  echo "${OTHER}   ${msg}${RESET}"
   echo ""
   echo "${INFO}✧ Have a good day! (˶˃ ᵕ ˂˶) ✧${RESET}"
 else
