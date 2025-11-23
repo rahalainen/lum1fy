@@ -15,11 +15,11 @@ lum1fy [options] <file|directory>
 
 Choose one of these modes: (default: `-q`)
 
-| Option | Default | Description |
-|------|--------|-------------|
-| `-q, --quality <crf>` | 30 | **Constant Quality mode** - CRF value (1-63, lower = higher quality) |
-| `-b, --bitrate <bitrate>` | - | **Average Bitrate mode** - Target video bitrate (e.g., 2000k) |
-| `--discord <mode>` | - | **Discord Auto-Calc** mode - Optimizes for Discord limits; <a href=#modes-for-discord-auto-calc>see table below</a> |
+| Option | Description |
+|------|-------------|
+| `-q, --quality <crf>` | **Constant Quality mode** - CRF value (1-63, lower = higher quality) |
+| `-b, --bitrate <bitrate>` | **Average Bitrate mode** - Target video bitrate (e.g., 2000k) |
+| `--discord <mode>` | **Discord Auto-Calc** mode - Optimizes for Discord limits; <a href=#modes-for-discord-auto-calc>see table below</a> |
 
 ### Modes for Discord Auto-Calc
 | Mode | Output size target | Description |
@@ -36,23 +36,23 @@ Choose one of these modes: (default: `-q`)
 - All of these go to `[options]`
 
 ### Video options
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-s, --speed <preset>` | 4 | SVT-AV1 speed preset (0-13, lower = slower but better quality) |
-| `--start <secs>` | 0 | Trim start (seconds or hh:mm:ss) |
-| `--end <secs>` | \<input len\> | Trim end (seconds or hh:mm:ss) |
-| `--merge-audio` | - | Mix multiple audio tracks into a single audio track |
+| Option | Description |
+|--------|-------------|
+| `-s, --speed <preset>` | SVT-AV1 speed preset (0-13, lower = slower but better quality) |
+| `--start <secs>` | Trim start (seconds or hh:mm:ss) |
+| `--end <secs>` | Trim end (seconds or hh:mm:ss) |
+| `--merge-audio` | Mix multiple audio tracks into a single audio track |
 
 ### General options
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--no-color` | - | Disable color output (NO_COLOR=1 also works) |
-| `-d, --dir` | - | Write outputs to `av1-output/<name>.mp4` instead of `<name>-av1.mp4` |
-| `-y, --yes` | - | Force overwrite existing files & force re-encode in `--discord` mode (non-interactive) |
-| `-n, --no` | - | Force skip existing files & in `--discord` mode if source file is smaller than the limit (non-interactive) |
-| `-r, --recursive` | - | Get videos recursively from given directories |
-| `-v, --verbose` | - | Enable verbose logging (print info-level events) |
-| `-h, --help` | - | Show this help message |
+| Option | Description |
+|--------|-------------|
+| `--no-color` | Disable color output (NO_COLOR=1 also works) |
+| `-d, --dir` | Write outputs to `av1-output/<name>.mp4` instead of `<name>-av1.mp4` |
+| `-y, --yes` | Force overwrite existing files & force re-encode in `--discord` mode (non-interactive) |
+| `-n, --no` | Force skip existing files & in `--discord` mode if source file is smaller than the limit (non-interactive) |
+| `-r, --recursive` | Get videos recursively from given directories |
+| `-v, --verbose` | Enable verbose logging (print info-level events) |
+| `-h, --help` | Show this help message |
 
 ---
 
