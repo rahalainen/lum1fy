@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 # ✧ lum1fy v1.4.0 ✧
-# converts videos to AV1 (SVT-AV1) with progress bars, trimming, bitrate/CRF modes,
-# Discord upload sizing, and optional audio merging
+# converts videos to AV1 (SVT-AV1) with CRF/bitrate/Discord-auto-calc 
+# encoding modes, start/end trimming, and audio stream merging
 #
 # ~ Usage ~
 #   lum1fy [options] <file|directory>
