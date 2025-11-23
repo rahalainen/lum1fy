@@ -1,7 +1,9 @@
 # ✧ lum1fy ✧
 AV1 video converter script using Zsh and FFmpeg
 
-Converts videos to AV1 (SVT-AV1) with CRF/bitrate/Discord encoding modes, start/end trimming, and audio stream merging.
+Converts videos to AV1 (SVT-AV1) with CRF/bitrate/Discord-auto-calc encoding modes, start/end trimming, and audio stream merging.
+
+###### NOTE: this is just a quick hobby project, the code is kinda messy
 
 ---
 ## Usage
