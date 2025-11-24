@@ -1,8 +1,9 @@
 # ✧ lum1fy ✧
-AV1 video converter script using Zsh and FFmpeg
+AV1 video converter script using Bash and FFmpeg
 
 Converts videos to AV1 (SVT-AV1) with CRF/bitrate/Discord-auto-calc encoding modes, start/end trimming, and audio stream merging.
 
+##### Requirements: `bash` (4.0+), `ffmpeg`, `ffprobe`, `awk`, `stat`
 ###### NOTE: this is just a quick hobby project, the code is kinda messy
 
 ---
@@ -69,6 +70,16 @@ lum1fy --merge-audio .
 ---
 
 ## Changelog
+
+<details>
+  <summary> ✧ v1.5.0 — Converted to Bash, audio improvements, bugfixes ✧ </summary>
+  
+  - Converted script from zsh to Bash
+  - Added `AUDIO_BITRATE_KBPS` variable, changed safety margin calculation
+  - Fixed `-r`/`--recursive` mode
+  - Added `SIGINT` trap for cleaner Ctrl+C handling
+  - Misc bug fixes and README improvements
+</details>
 
 <details>
   <summary> ✧ v1.4.0 — Improved stats printing, added force-skip mode ✧ </summary>
