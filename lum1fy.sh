@@ -1,5 +1,5 @@
-#!/usr/bin/env zsh
-# ✧ lum1fy v1.4.0 ✧
+#!/usr/bin/env bash
+# ✧ lum1fy v1.5.0 ✧
 # converts videos to AV1 (SVT-AV1) with CRF/bitrate/Discord-auto-calc 
 # encoding modes, start/end trimming, and audio stream merging
 #
@@ -32,13 +32,23 @@
 #   lum1fy --discord basic --start 10 --end 40 --merge-audio ~/Videos/cool-clip.mp4
 #   lum1fy --merge-audio -n .
 
-
 ## --- user defaults (configurable) --- ##
 DEFAULT_SPEED=4
 DEFAULT_CRF=30
-MAX_bitrate_KBPS="12000"      # cap for calculated discord bitrate
-MARGIN_KBPS="500"             # extra margin for discord bitrate (audio + overhead)
-OUTPUT_DIR_NAME="av1-output"  # name for the output directory (still stored relative to input files!)
+AUDIO_BITRATE_KBPS="192"
+MAX_BITRATE_KBPS="12000"                    # cap for calculated discord bitrate
+MARGIN_KBPS=$(( AUDIO_BITRATE_KBPS + 256 )) # extra margin for discord bitrate (audio + overhead)
+OUTPUT_DIR_NAME="av1-output"                # name for the output directory (still stored relative to input files!)
+
+
+## --- bash settings, signal traps --- ##
+cleanup() {
+  echo ""
+  warning "Interrupted by user! Exiting..."
+  exit 1
+}
+trap cleanup SIGINT
+shopt -s globstar nullglob
 
 
 ## --- runtime globals (do not touch) --- ##
@@ -46,9 +56,6 @@ total_time=0
 total_in_size=0
 total_out_size=0
 processed_count=0
-script_path="${(%):-%x}"
-script_dir="$(dirname "$script_path")"
-script_name="$(basename "$script_path")"
 discord_mode=""
 bitrate_mode=false
 bitrate=""
@@ -64,6 +71,13 @@ input_files=()
 quality_exclusive_count=0
 yes_no_exclusive_count=0
 
+# script path / dir (bash-safe)
+# works with symlinks on many platforms (readlink -f may not exist on mac)
+if [[ -n "${BASH_SOURCE[0]}" ]]; then
+  script_path="${BASH_SOURCE[0]}"
+else
+  script_path="$0"
+fi
 
 ## --- set colors --- ##
 USE_COLOR=true
@@ -72,7 +86,7 @@ for arg in "$@"; do
 done
 [[ -n "$NO_COLOR" ]] && USE_COLOR=false
 
-if $USE_COLOR && [[ -t 1 ]]; then
+if [[ "$USE_COLOR" == true ]] && [[ -t 1 ]]; then
   GREEN="\033[32m"
   YELLOW="\033[33m"
   MAGENTA="\033[35m"
@@ -85,11 +99,11 @@ else
 fi
 
 # set default colors for each log level
-SUCCESS=$GREEN
-INFO=$CYAN
-WARNING=$YELLOW
-ERROR=$RED
-OTHER=$MAGENTA
+SUCCESS="$GREEN"
+INFO="$CYAN"
+WARNING="$YELLOW"
+ERROR="$RED"
+OTHER="$MAGENTA"
 
 
 ## --- print helpers --- ##
@@ -111,7 +125,7 @@ show_help() {
 
 success() {
   local emojis=("◝(ᵔᗜᵔ)◜" "/ᐠ˵-⩊-˵マ" "(˶ˆ꒳ˆ˵)")
-  local emoji="${emojis[RANDOM % ${#emojis[@]} + 1]}"
+  local emoji="${emojis[RANDOM % ${#emojis[@]}]}"
   if [[ "$USE_COLOR" != false ]]; then
     echo -e "${SUCCESS}[✓] ${emoji} | $*${RESET}"
   else
@@ -120,9 +134,9 @@ success() {
 }
 
 info() {
-  if ! $verbose; then return; fi
+  if [[ "$verbose" != true ]]; then return; fi
   local emojis=("ᓚᘏᗢ" "/ᐠ-˕-マ" "/ᐠ. .ᐟ\Ⳋ")
-  local emoji="${emojis[RANDOM % ${#emojis[@]} + 1]}"
+  local emoji="${emojis[RANDOM % ${#emojis[@]}]}"
   if [[ "$USE_COLOR" != false ]]; then
     echo -e "${INFO}[ℹ] ${emoji} | $*${RESET}"
   else
@@ -132,7 +146,7 @@ info() {
 
 warning() {
   local emojis=("(˶°ㅁ°)!!" "(≖_≖ )" "(¬_¬\")")
-  local emoji="${emojis[RANDOM % ${#emojis[@]} + 1]}"
+  local emoji="${emojis[RANDOM % ${#emojis[@]}]}"
   if [[ "$USE_COLOR" != false ]]; then
     echo -e "${WARNING}[⚠︎] ${emoji} | $*${RESET}"
   else
@@ -142,7 +156,7 @@ warning() {
 
 error() {
   local emojis=("╥﹏╥" "/ᐠ╥˕╥マ")
-  local emoji="${emojis[RANDOM % ${#emojis[@]} + 1]}"
+  local emoji="${emojis[RANDOM % ${#emojis[@]}]}"
   if [[ "$USE_COLOR" != false ]]; then
     echo -e "${ERROR}[×] ${emoji} | $*${RESET}"
   else
@@ -156,13 +170,27 @@ error() {
 # usage: is_number_in_range VALUE [MIN] [MAX]
 is_number_in_range() {
   local val="$1"
-  local min="$2"
-  local max="$3"
+  local min="${2:-}"
+  local max="${3:-}"
 
-  [[ "$val" =~ '^[0-9]+$' ]] || return false
-  [[ -n "$min" ]] && (( val <= min )) && return false
-  [[ -n "$max" ]] && (( val >= max )) && return false
-  return true
+  # integer only
+  if [[ ! "$val" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  if [[ -n "$min" ]]; then
+    if (( val < min )); then
+      return 1
+    fi
+  fi
+
+  if [[ -n "$max" ]]; then
+    if (( val > max )); then
+      return 1
+    fi
+  fi
+
+  return 0
 }
 
 # prettify seconds to hours, minutes and seconds
@@ -181,7 +209,8 @@ format_duration() {
   fi
 }
 
-# parse time string (hh:mm:ss or seconds) into seconds (integer)
+# parse time string into seconds (integer)
+# usage: parse_time_to_seconds < hh:mm:ss | mm:ss | seconds >
 parse_time_to_seconds() {
   local t="$1"
   if [[ -z "$t" ]]; then
@@ -193,21 +222,23 @@ parse_time_to_seconds() {
     return
   fi
   if [[ "$t" =~ ^([0-9]+):([0-9]{1,2}):([0-9]{1,2})$ ]]; then
-    echo $(( ${match[1]} * 3600 + ${match[2]} * 60 + ${match[3]} ))
+    echo $(( BASH_REMATCH[1]*3600 + BASH_REMATCH[2]*60 + BASH_REMATCH[3] ))
     return
   fi
   if [[ "$t" =~ ^([0-9]{1,2}):([0-9]{1,2})$ ]]; then
-    echo $(( ${match[1]} * 60 + ${match[2]} ))
+    echo $(( BASH_REMATCH[1]*60 + BASH_REMATCH[2] ))
     return
   fi
-  # fallback: return the original value
+  # fallback: return the original value (best effort)
   echo "$t"
 }
 
-# get duration in seconds (floating) from ffprobe
+# get duration in seconds (float converted to int) from ffprobe
+# usage: get_duration INPUT_FILE
 get_duration() {
   local infile="$1"
-  ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$infile" 2>/dev/null || echo 0
+  local dur=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$infile" 2>/dev/null || echo 0)
+  echo "${dur%.*}"
 }
 
 # calculate bitrate for discord mode
@@ -222,9 +253,9 @@ calculate_discord_bitrate() {
   # calculate bitrate
   local bitrate_kbps=$(( target_kbits / clip_len - MARGIN_KBPS ))
 
-  # cap by MAX_bitrate_KBPS if provided
-  if (( MAX_bitrate_KBPS > 0 && bitrate_kbps > MAX_bitrate_KBPS )); then
-    bitrate_kbps=$MAX_bitrate_KBPS
+  # cap by MAX_BITRATE_KBPS if provided
+  if (( MAX_BITRATE_KBPS > 0 && bitrate_kbps > MAX_BITRATE_KBPS )); then
+    bitrate_kbps="$MAX_BITRATE_KBPS"
   fi
 
   echo "$bitrate_kbps"
@@ -235,23 +266,28 @@ calculate_discord_bitrate() {
 build_audio_args() {
   local infile="$1"
   local merge_flag="$2"
-  if ! $merge_flag; then
+  if [[ "$merge_flag" != true ]]; then
     echo "-c:a copy"
     return
   fi
 
   # count audio streams
-  local stream_count
-  stream_count=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$infile" 2>/dev/null | wc -l | tr -d ' ')
-  if (( stream_count > 1 )); then
-    # build amix for all audio streams
-    echo "-filter_complex [0:a:0][0:a:1]amix=inputs=${stream_count}:duration=longest:normalize=0[aout] -map 0:v -map [aout]"
-  else
+  local streams=($(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$infile"))
+  local count=${#streams[@]}
+  if (( count <= 1 )); then
     echo "-c:a copy"
+    return
   fi
+
+  # build dynamic amix string
+  local input_map=""
+  for i in "${streams[@]}"; do
+    input_map+="[0:a:${i}]"
+  done
+
+  echo "-filter_complex ${input_map}amix=inputs=${count}:duration=longest:normalize=1[aout] -map 0:v -map [aout] -c:a  -b:a ${AUDIO_BITRATE_KBPS}k -ac 2"
 }
 
-# build ffmpeg args per file dynamically
 build_ffmpeg_args() {
   local infile="$1"
   local outfile="$2"
@@ -268,12 +304,12 @@ build_ffmpeg_args() {
   args+=(-progress pipe:1 -nostats -y)
 
   # clip start time
-  if [[ -n "$start_s" ]]; then
+  if [[ -n "$start_s" && "$start_s" != "0" ]]; then
     args+=(-ss "$start_s")
   fi
 
   # clip end time
-  if [[ -n "$end_s" ]]; then
+  if [[ -n "$end_s" && "$end_s" != "0" ]]; then
     args+=(-to "$end_s")
   fi
 
@@ -281,24 +317,29 @@ build_ffmpeg_args() {
   args+=(-i "$infile")
 
   # video args
-  [[ -z "$SPEED" ]] && SPEED=$DEFAULT_SPEED
-  [[ -z "$CRF" ]] && CRF=$DEFAULT_CRF
+  [[ -z "$SPEED" ]] && SPEED="$DEFAULT_SPEED"
+  [[ -z "$CRF" ]] && CRF="$DEFAULT_CRF"
 
-  if $bitrate_mode; then
-    # explicit bitrate mode or discord calculated
+  if [[ "$bitrate_mode" == true ]]; then
     args+=(-c:v libsvtav1 -svtav1-params "no-progress=1:rc=1:tbr=${bitrate}:preset=${SPEED}")
   else
-    # CRF mode
     args+=(-c:v libsvtav1 -svtav1-params "no-progress=1:rc=0:crf=${CRF}:preset=${SPEED}")
   fi
 
   # audio args
-  args+=($(build_audio_args "$infile" $merge_audio))
+  local audio_args=$(build_audio_args "$infile" "$merge_audio")
+  read -r -a audio_arr <<< "$audio_args"
+  for tok in "${audio_arr[@]}"; do
+    args+=("$tok")
+  done
 
   # output file
   args+=("$outfile")
 
-  echo "${args[@]}"
+  # print one per line so caller can mapfile safely
+  for a in "${args[@]}"; do
+    printf '%s\n' "$a"
+  done
 }
 
 # core encoder with progress
@@ -309,14 +350,13 @@ encode_with_progress() {
   local end_s="$4"
   local clip_len="$5"
 
-  # build ffmpeg command
-  local ffmpeg_args
-  ffmpeg_args=($(build_ffmpeg_args "$infile" "$outfile" "$start_s" "$end_s"))
-  info "Running FFmpeg with command: '${RESET}ffmpeg $ffmpeg_args[@]${INFO}'\n"
+  # read ffmpeg args into an array
+  mapfile -t ffmpeg_args < <(build_ffmpeg_args "$infile" "$outfile" "$start_s" "$end_s")
+  info "Running FFmpeg with command: '${RESET}ffmpeg ${ffmpeg_args[*]}${INFO}'\n"
+  export SVT_LOG=1  # sets SVT log level to [error]
 
   # run ffmpeg and pipe progress
-  export SVT_LOG=1  # sets SVT log level to [error]
-  ffmpeg "${ffmpeg_args[@]}" | awk -v dur="$clip_len" -v c1=$RED -v c2=$YELLOW -v c3=$GREEN -v RESET=$RESET '
+  ffmpeg "${ffmpeg_args[@]}" | awk -v dur="$clip_len" -v c1="$RED" -v c2="$YELLOW" -v c3="$GREEN" -v RESET="$RESET" '
     BEGIN { bar_len = 32 }
     /^out_time_ms=/ {
       gsub(/out_time_ms=/, "")
@@ -338,29 +378,39 @@ encode_with_progress() {
     }
     END { print "" }
   '
+  local ff_exit=${PIPESTATUS[0]}
+  return $ff_exit
 }
 
 # process a single file
 process_file() {
   local infile="$1"
-  local base=${infile:t:r}
-  local dir=${infile:h}
-  local outfile
+  local count="$2"
+  local total="$3"
 
-  if $output_dir_mode; then
-    mkdir -p $OUTPUT_DIR_NAME
-    outfile="${dir}/$OUTPUT_DIR_NAME/${base}.mp4"
+  local base
+  base="$(basename "$infile")"
+  base="${base%.*}"   # remove extension
+  local dir
+  dir="$(dirname "$infile")"
+
+  local outfile
+  if [[ "$output_dir_mode" == true ]]; then
+    mkdir -p "$PWD/$OUTPUT_DIR_NAME"
+    outfile="$PWD/$OUTPUT_DIR_NAME/${base}.mp4"
   else
     outfile="${dir}/${base}-av1.mp4"
   fi
 
   echo ""
-  echo "${INFO}✧ lum1fying ${RESET}${infile} (${count}/${total}) ${INFO}✧${RESET}"
-  local start=$(date +%s)
+  echo -e "${INFO}✧ lum1fying ${RESET}${infile} (${count}/${total}) ${INFO}✧${RESET}"
+  local start_time=$(date +%s)
   local in_size=$(stat -c%s "$infile" 2>/dev/null || stat -f%z "$infile")
 
   # get start time and end time
-  (( $end_s <= 0 )) && end_s=$(get_duration "$infile")
+  if (( end_s <= 0 )); then
+    end_s=$(get_duration "$infile")
+  fi
 
   # compute clip length (seconds)
   local clip_len=$(( end_s - start_s ))
@@ -387,8 +437,9 @@ process_file() {
     # pass start/end seconds into calculator
     bitrate=$(calculate_discord_bitrate "$limit_mb" "$clip_len") || { error "Discord bitrate calc failed!"; return 1; }
     bitrate_mode=true
-    if (( in_size < bitrate * clip_len / 8 * 1000 )) && ! $force_overwrite; then
-      if $force_skip; then
+    local expected_bytes=$(( bitrate * 1000 * clip_len / 8 ))
+    if (( in_size < expected_bytes )) && [[ "$force_overwrite" != true ]]; then
+      if [[ "$force_skip" == true ]]; then
         warning "Skipping '${RESET}$infile${WARNING}' (output exists)..."
         return 2
       fi
@@ -398,14 +449,17 @@ process_file() {
         "$discord_mode" \
         "$limit_mb"
       read -r answer
-      [[ $answer != [Yy]* ]] && { warning "Skipping '${RESET}$infile${WARNING} (canceled)..."; return 2 }
+      if [[ "$answer" != [Yy]* ]]; then
+        warning "Skipping '${RESET}$infile${WARNING} (canceled)..."
+        return 2
+      fi
     fi
     info "Discord mode '$discord_mode' selected: bitrate will be ${bitrate} kbps!"
   fi
 
   # check if file exists (better error handling than native ffmpeg)
-  if [[ -f "$outfile" ]] && ! $force_overwrite; then
-    if $force_skip; then
+  if [[ -f "$outfile" ]] && [[ "$force_overwrite" != true ]]; then
+    if [[ "$force_skip" == true ]]; then
       warning "Skipping '${RESET}$infile${WARNING}' (output exists)..."
       return 2
     fi
@@ -413,7 +467,7 @@ process_file() {
     # interactive
     echo -n "File '$outfile' already exists. Overwrite? [y/N] "
     read -r ans
-    if [[ $ans != [Yy]* ]]; then
+    if [[ "$ans" != [Yy]* ]]; then
       warning "Skipping '${RESET}$infile${WARNING}' (output exists)..."
       return 2
     fi
@@ -421,14 +475,14 @@ process_file() {
 
   # run encoder
   encode_with_progress "$infile" "$outfile" "$start_s" "$end_s" "$clip_len"
-  ffmpeg_exit=${pipestatus[1]}  # 1 = first command in the pipe
+  ffmpeg_exit=$?
   if (( ffmpeg_exit != 0 )); then
     error "FFmpeg failed with code $ffmpeg_exit"
     return 1
   fi
 
-  local end=$(date +%s)
-  local elapsed=$(( end - start ))
+  local end_time=$(date +%s)
+  local elapsed=$(( end_time - start_time ))
   local took=$(format_duration "$elapsed")
 
   local out_size=$(stat -c%s "$outfile" 2>/dev/null || stat -f%z "$outfile")
@@ -459,11 +513,43 @@ process_file() {
   processed_count=$(( processed_count + 1 ))
 }
 
+# collect files from input path (file/dir)
+# usage: collect_files INPUT IS_RECURSIVE
+collect_files() {
+    local input="$1"
+    local recursive="$2"
+    local out=()
+
+    local exts=(mp4 mkv mov webm)
+
+    if [[ -d "$input" ]]; then
+        if [[ "$recursive" == true ]]; then
+            for ext in "${exts[@]}"; do
+                out+=( "$input"/**/*."$ext" )
+            done
+        else
+            for ext in "${exts[@]}"; do
+                out+=( "$input"/*."$ext" )
+            done
+        fi
+    elif [[ -f "$input" ]]; then
+        out+=( "$input" )
+    fi
+
+    # filter out already-encoded + output-dir
+    local filtered=()
+    for f in "${out[@]}"; do
+        [[ "$f" != *-av1.mp4 && "$f" != *"$OUTPUT_DIR_NAME"* ]] && filtered+=("$f")
+    done
+
+    printf '%s\n' "${filtered[@]}"
+}
+
 
 ## --- check dependencies --- ##
 # ensure dependencies
 for cmd in ffmpeg ffprobe awk stat; do
-  if ! command -v $cmd >/dev/null 2>&1; then
+  if ! command -v "$cmd" >/dev/null 2>&1; then
     error "Required command '$cmd' not found in PATH!"
     exit 1
   fi
@@ -549,33 +635,12 @@ fi
 ## --- main logic --- ##
 files=()
 
-# collect files
-for inpath in "${input_files[@]}"; do
-  if [ -d "$inpath" ]; then
-    if [ "$recursive" = true ]; then
-      # recursively find matching files
-      while IFS= read -r -d '' f; do
-        files+=("$f")
-      done < <(find "$inpath" -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.mov' -o -iname '*.webm' \) -print0)
-    else
-      # non-recursive glob (nullglob-safe)
-      dirfiles=("$inpath"/*.{mp4,mkv,mov,webm}(.N))
-      files+=("${dirfiles[@]}")
-    fi
-  elif [ -f "$inpath" ]; then
-    files+=("$inpath")
-  else
-    warn "Skipping invalid input: $inpath"
-  fi
+# collect and filter files from input parameters
+for input in "${input_files[@]}"; do
+  while IFS= read -r f; do
+    files+=("$f")
+  done < <(collect_files "$input" "$recursive")
 done
-
-# filter out any that end with -av1.mp4
-filtered=()
-for f in "${files[@]}"; do
-  [[ "$f" == *-av1.mp4 ]] && continue
-  filtered+=("$f")
-done
-files=("${filtered[@]}")
 
 total=${#files[@]}
 if (( total == 0 )); then
@@ -612,12 +677,12 @@ if (( processed_count > 0 )); then
   fi
 
   echo ""
-  echo "${INFO}✧ ${BOLD}All done in ${RESET}${total_time_str}${INFO}${BOLD}! ${RESET}${processed_count} ${INFO}${BOLD}file(s) processed ${RESET}${INFO}✧${RESET}"
-  echo "${OTHER}   Total input size:${RESET} ${total_in_size_mb} MB"
-  echo "${OTHER}   Total output size:${RESET} ${total_out_size_mb} MB"
-  echo "${OTHER}   ${msg}${RESET}"
+  echo -e "${INFO}✧ ${BOLD}All done in ${RESET}${total_time_str}${INFO}${BOLD}! ${RESET}${processed_count} ${INFO}${BOLD}file(s) processed ${RESET}${INFO}✧${RESET}"
+  echo -e "${OTHER}   Total input size:${RESET} ${total_in_size_mb} MB"
+  echo -e "${OTHER}   Total output size:${RESET} ${total_out_size_mb} MB"
+  echo -e "${OTHER}   ${msg}${RESET}"
   echo ""
-  echo "${INFO}✧ Have a good day! (˶˃ ᵕ ˂˶) ✧${RESET}"
+  echo -e "${INFO}✧ Have a good day! (˶˃ ᵕ ˂˶) ✧${RESET}"
 else
   error "No files processed!"
 fi
