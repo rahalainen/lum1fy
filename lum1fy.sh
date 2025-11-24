@@ -282,10 +282,11 @@ build_audio_args() {
   # build dynamic amix string
   local input_map=""
   for i in "${streams[@]}"; do
-    input_map+="[0:a:${i}]"
+    local idx=$((i-1))
+    input_map+="[0:a:${idx}]"
   done
 
-  echo "-filter_complex ${input_map}amix=inputs=${count}:duration=longest:normalize=1[aout] -map 0:v -map [aout] -c:a  -b:a ${AUDIO_BITRATE_KBPS}k -ac 2"
+  echo "-filter_complex ${input_map}amix=inputs=${count}:duration=longest:normalize=1[aout] -map 0:v -map [aout] -b:a ${AUDIO_BITRATE_KBPS}k -ac 2"
 }
 
 build_ffmpeg_args() {
