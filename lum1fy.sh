@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ✧ lum1fy v1.5.0 ✧
+# ✧ lum1fy v1.5.1 ✧
 # converts videos to AV1 (SVT-AV1) with CRF/bitrate/Discord-auto-calc 
 # encoding modes, start/end trimming, and audio stream merging
 #
@@ -48,7 +48,7 @@ cleanup() {
   exit 1
 }
 trap cleanup SIGINT
-shopt -s globstar nullglob
+shopt -s globstar nullglob nocaseglob extglob
 
 
 ## --- runtime globals (do not touch) --- ##
@@ -517,33 +517,41 @@ process_file() {
 # collect files from input path (file/dir)
 # usage: collect_files INPUT IS_RECURSIVE
 collect_files() {
-    local input="$1"
-    local recursive="$2"
-    local out=()
+  local input="$1"
+  local recursive="$2"
+  local out=()
 
-    local exts=(mp4 mkv mov webm)
+  local video_exts="@(mp4|mkv|mov|webm)"
 
-    if [[ -d "$input" ]]; then
-        if [[ "$recursive" == true ]]; then
-            for ext in "${exts[@]}"; do
-                out+=( "$input"/**/*."$ext" )
-            done
-        else
-            for ext in "${exts[@]}"; do
-                out+=( "$input"/*."$ext" )
-            done
-        fi
-    elif [[ -f "$input" ]]; then
-        out+=( "$input" )
+  if [[ -d "$input" ]]; then
+    # parse directories
+    if [[ "$recursive" == true ]]; then
+        out=( "$input"/**/*.$video_exts )
+    else
+        out=( "$input"/*.$video_exts )
     fi
+  elif [[ -f "$input" ]]; then
+    # parse files
+    if [[ "$input" == *.$video_exts ]]; then
+      out+=( "$input" )
+    fi
+  fi
 
-    # filter out already-encoded + output-dir
-    local filtered=()
-    for f in "${out[@]}"; do
-        [[ "$f" != *-av1.mp4 && "$f" != *"$OUTPUT_DIR_NAME"* ]] && filtered+=("$f")
-    done
+  # filter out nonexistent and already encoded files
+  local filtered=()
+  for f in "${out[@]}"; do
+    if [[ -f "$f" \
+        && "$f" != *-av1.mp4 \
+        && "$f" != "$OUTPUT_DIR_NAME/"* \
+        && "$f" != *"/$OUTPUT_DIR_NAME/"* ]]; then
+      filtered+=("$f")
+    fi
+  done
 
+  # only print if we actually have files
+  if (( ${#filtered[@]} > 0 )); then
     printf '%s\n' "${filtered[@]}"
+  fi
 }
 
 
@@ -590,15 +598,15 @@ while [[ $# -gt 0 ]]; do
       ((quality_exclusive_count++)); discord_mode="$2"; shift 2
       ;;
     --start)
-      if ! is_number_in_range "$2" 0 ""; then
-        error "$1 requires a start time (seconds)"
+      if [[ -z "$2" ]]; then
+        error "$1 requires a start time (hh:mm:)ss"
         exit 1
       fi
       start_s=$(parse_time_to_seconds "$2"); shift 2
       ;;
     --end)
-      if ! is_number_in_range "$2" 0 ""; then
-        error "$1 requires an end time (seconds)"
+      if [[ -z "$2" ]]; then
+        error "$1 requires an end time (hh:mm:)ss"
         exit 1
       fi
       end_s=$(parse_time_to_seconds "$2"); shift 2
@@ -638,11 +646,8 @@ files=()
 
 # collect and filter files from input parameters
 for input in "${input_files[@]}"; do
-  while IFS= read -r f; do
-    files+=("$f")
-  done < <(collect_files "$input" "$recursive")
+  mapfile -t -O "${#files[@]}" files < <(collect_files "$input" "$recursive")
 done
-
 total=${#files[@]}
 if (( total == 0 )); then
   error "No supported files found!"
