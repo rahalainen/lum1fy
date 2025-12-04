@@ -72,6 +72,13 @@ lum1fy --merge-audio .
 ## Changelog
 
 <details>
+  <summary> ✧ v1.5.1 — Bugfixes to file handling and start/end time parsing ✧ </summary>
+  
+  - Fixed file handling
+  - Fixed hh\:mm\:ss parsing in `--start` and `--end`
+</details>
+
+<details>
   <summary> ✧ v1.5.0 — Converted to Bash, audio improvements, bugfixes ✧ </summary>
   
   - Converted script from zsh to Bash
