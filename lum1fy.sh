@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ✧ lum1fy v1.5.1 ✧
+# ✧ lum1fy v1.5.2 ✧
 # converts videos to AV1 (SVT-AV1) with CRF/bitrate/Discord-auto-calc 
 # encoding modes, start/end trimming, and audio stream merging
 #
@@ -36,8 +36,8 @@
 DEFAULT_SPEED=4
 DEFAULT_CRF=30
 AUDIO_BITRATE_KBPS="192"
-MAX_BITRATE_KBPS="12000"                    # cap for calculated discord bitrate
-MARGIN_KBPS=$(( AUDIO_BITRATE_KBPS + 256 )) # extra margin for discord bitrate (audio + overhead)
+SAFETY_FACTOR=90                            # safety factor percentage for discord bitrate calculation
+MAX_BITRATE_KBPS="16000"                    # cap for calculated discord bitrate
 OUTPUT_DIR_NAME="av1-output"                # name for the output directory (still stored relative to input files!)
 
 
@@ -58,7 +58,7 @@ total_out_size=0
 processed_count=0
 discord_mode=""
 bitrate_mode=false
-bitrate=""
+bitrate=0
 start_s=0
 end_s=0
 merge_audio=false
@@ -247,11 +247,16 @@ calculate_discord_bitrate() {
   local limit_mb="$1"
   local clip_len="$2"
 
-  # target kbits = MB * 8 * 1000
-  local target_kbits=$(( limit_mb * 8 * 1000 ))
+  # convert limit to kbits
+  local total_available_kbits=$(( limit_mb * 8192 ))
+
+  # subtract audio size
+  local audio_size_kbits=$(( AUDIO_BITRATE_KBPS * clip_len ))
+  local video_available_kbits=$(( total_available_kbits - audio_size_kbits ))
 
   # calculate bitrate
-  local bitrate_kbps=$(( target_kbits / clip_len - MARGIN_KBPS ))
+  local safe_video_kbits=$(( video_available_kbits * SAFETY_FACTOR / 100 ))
+  local bitrate_kbps=$(( safe_video_kbits / clip_len ))
 
   # cap by MAX_BITRATE_KBPS if provided
   if (( MAX_BITRATE_KBPS > 0 && bitrate_kbps > MAX_BITRATE_KBPS )); then
@@ -322,7 +327,8 @@ build_ffmpeg_args() {
   [[ -z "$CRF" ]] && CRF="$DEFAULT_CRF"
 
   if [[ "$bitrate_mode" == true ]]; then
-    args+=(-c:v libsvtav1 -svtav1-params "no-progress=1:rc=1:tbr=${bitrate}:preset=${SPEED}")
+    local overshoot_pct=$(( 100 * (100 / SAFETY_FACTOR) - 100 ))
+    args+=(-c:v libsvtav1 -svtav1-params "no-progress=1:rc=0:crf=20:mbr=${bitrate}:mbr-overshoot-pct=${overshoot_pct}:preset=${SPEED}")
   else
     args+=(-c:v libsvtav1 -svtav1-params "no-progress=1:rc=0:crf=${CRF}:preset=${SPEED}")
   fi
