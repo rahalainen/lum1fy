@@ -75,7 +75,7 @@ lum1fy --merge-audio .
 ## Changelog
 
 <details>
-  <summary> ✧ v1.5.2 — Fixed bitrate mode added demo ✧ </summary>
+  <summary> ✧ v1.5.2 — Fixed bitrate mode, added demo ✧ </summary>
   - Fixed bitrate mode by changing VBR to CRF with MaxBitRate and MbrOverShootPct
   - Added demo VHS script + output GIF to README.md
 </details>
