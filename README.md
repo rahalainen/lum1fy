@@ -1,9 +1,12 @@
 # ✧ lum1fy ✧
 AV1 video converter script using Bash and FFmpeg
 
+![lum1fy demo](docs/demo/lum1fy.gif)
+
 Converts videos to AV1 (SVT-AV1) with CRF/bitrate/Discord-auto-calc encoding modes, start/end trimming, and audio stream merging.
 
 ##### Requirements: `bash` (4.0+), `ffmpeg`, `ffprobe`, `awk`, `stat`
+
 ###### NOTE: this is just a quick hobby project, the code is kinda messy
 
 ---
@@ -70,6 +73,12 @@ lum1fy --merge-audio .
 ---
 
 ## Changelog
+
+<details>
+  <summary> ✧ v1.5.2 — Fixed bitrate mode added demo ✧ </summary>
+  - Fixed bitrate mode by changing VBR to CRF with MaxBitRate and MbrOverShootPct
+  - Added demo VHS script + output GIF to README.md
+</details>
 
 <details>
   <summary> ✧ v1.5.1 — Bugfixes to file handling and start/end time parsing ✧ </summary>
